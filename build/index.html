@@ -108,10 +108,12 @@
     .alternative-note { margin: 2px 0 0; color: #7f948b; font-size: .75rem; line-height: 1.45; }
     .cardio-log { display: grid; gap: 10px; margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
     .cardio-log > label { display: grid; gap: 5px; color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+    .cardio-distance { width: 100%; height: 42px; padding: 0 11px; color: var(--ink); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 10px; font-weight: 800; }
     .time-entry { display: grid; grid-template-columns: 1fr auto 1fr; gap: 7px; align-items: center; }
     .time-entry input { width: 100%; height: 42px; padding: 0 9px; color: var(--ink); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 10px; text-align: center; font-weight: 800; }
     .time-entry span { color: var(--muted); font-weight: 850; }
     .cardio-feedback { min-height: 1.3em; margin: 0; color: var(--lime); font-size: .8rem; line-height: 1.4; }
+    .cardio-pace { margin: 0; color: var(--ink); font-size: .82rem; font-weight: 800; }
     .cardio-history { list-style: none; margin: 2px 0 0; padding: 0; }
     .cardio-history li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: .78rem; }
     .cardio-history span { color: var(--muted); }
@@ -239,11 +241,15 @@
               <label for="cardioType">Record an attempt
                 <select id="cardioType"><option value="walk">Walk</option><option value="run">Run</option></select>
               </label>
-              <div class="time-entry" aria-label="Time taken">
-                <input id="cardioMinutes" type="number" min="0" max="180" inputmode="numeric" placeholder="min" aria-label="Minutes">
+              <label for="cardioDistance">Total distance (miles)
+                <input class="cardio-distance" id="cardioDistance" type="number" min="0.01" max="250" step="0.01" inputmode="decimal" placeholder="e.g. 3.1">
+              </label>
+              <div class="time-entry" aria-label="Total time taken">
+                <input id="cardioMinutes" type="number" min="0" max="1440" inputmode="numeric" placeholder="min" aria-label="Minutes">
                 <span>:</span>
                 <input id="cardioSeconds" type="number" min="0" max="59" inputmode="numeric" placeholder="sec" aria-label="Seconds">
               </div>
+              <p class="cardio-pace" id="cardioPacePreview">Average pace —</p>
               <button class="btn" id="saveCardioTime" type="button">Save time</button>
               <p class="cardio-feedback" id="cardioFeedback" role="status"></p>
               <ul class="cardio-history" id="cardioHistory" aria-label="Recent run and walk attempts"></ul>
@@ -513,6 +519,41 @@
       return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
     }
 
+    function parseDistanceMiles(distance) {
+      if (typeof distance === 'number' && Number.isFinite(distance)) return distance;
+      const text = String(distance || '').trim();
+      if (text.includes('½')) return 0.5;
+      const parsed = Number.parseFloat(text);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function officialDistanceMiles(type, cardio) {
+      return parseDistanceMiles(type === 'run' ? cardio.runDistance : cardio.walkDistance);
+    }
+
+    function savedCardioMiles(item) {
+      const miles = Number(item.miles);
+      return Number.isFinite(miles) && miles > 0 ? miles : parseDistanceMiles(item.distance);
+    }
+
+    function savedCardioPace(item) {
+      const pace = Number(item.paceSeconds);
+      if (Number.isFinite(pace) && pace > 0) return Math.round(pace);
+      const miles = savedCardioMiles(item);
+      return miles > 0 ? Math.round(Number(item.seconds) / miles) : Number(item.seconds);
+    }
+
+    function savedTargetPace(item) {
+      const pace = Number(item.targetPaceSeconds);
+      if (Number.isFinite(pace) && pace > 0) return Math.round(pace);
+      const officialMiles = parseDistanceMiles(item.distance);
+      return officialMiles > 0 ? Math.round(Number(item.target) / officialMiles) : Number(item.target);
+    }
+
+    function formatMiles(miles) {
+      return `${Number(miles.toFixed(2))} mi`;
+    }
+
     function unlockAudio() {
       if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
       if (audioContext.state === 'suspended') audioContext.resume();
@@ -723,16 +764,29 @@
       const walkOption = $('cardioType').querySelector('option[value="walk"]');
       walkOption.disabled = !cardio.walk;
       if (!cardio.walk && $('cardioType').value === 'walk') $('cardioType').value = 'run';
+      $('cardioDistance').value = officialDistanceMiles($('cardioType').value, cardio);
+      updateCardioPacePreview();
       renderCardioHistory();
       localStorage.setItem('five-daily-age', $('ageInput').value);
+    }
+
+    function updateCardioPacePreview() {
+      const miles = Number($('cardioDistance').value);
+      const minutes = Number($('cardioMinutes').value) || 0;
+      const secondsPart = Number($('cardioSeconds').value) || 0;
+      const totalSeconds = minutes * 60 + secondsPart;
+      $('cardioPacePreview').textContent = Number.isFinite(miles) && miles > 0 && totalSeconds > 0 && secondsPart <= 59
+        ? `Average pace ${formatTargetTime(Math.round(totalSeconds / miles))} per mile`
+        : 'Average pace —';
     }
 
     function renderCardioHistory() {
       const recent = cardioHistory.filter(item => recordProgram(item) === '5bx').slice(0, 3);
       $('cardioHistory').innerHTML = recent.length ? recent.map(item => {
         const label = `${item.type === 'run' ? 'Run' : 'Walk'} · C${item.chart} ${item.level}`;
-        const result = item.metTarget ? 'target met' : `target ${formatTargetTime(item.target)}`;
-        return `<li><span>${label}<br>${new Date(item.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${result}</span><strong>${formatTargetTime(item.seconds)}</strong></li>`;
+        const result = item.metTarget ? 'target met' : `target ${formatTargetTime(savedTargetPace(item))}/mi`;
+        const miles = savedCardioMiles(item);
+        return `<li><span>${label}<br>${new Date(item.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${formatMiles(miles)} in ${formatTargetTime(item.seconds)} · ${result}</span><strong>${formatTargetTime(savedCardioPace(item))}/mi</strong></li>`;
       }).join('') : '<li><span>No run or walk times recorded yet.</span></li>';
     }
 
@@ -740,8 +794,13 @@
       if (state.program !== '5bx') return;
       const minutes = Number($('cardioMinutes').value) || 0;
       const secondsPart = Number($('cardioSeconds').value) || 0;
+      const miles = Number($('cardioDistance').value);
       if (minutes < 0 || secondsPart < 0 || secondsPart > 59 || (minutes === 0 && secondsPart === 0)) {
         $('cardioFeedback').textContent = 'Enter a valid time greater than zero.';
+        return;
+      }
+      if (!Number.isFinite(miles) || miles <= 0) {
+        $('cardioFeedback').textContent = 'Enter a valid total distance greater than zero.';
         return;
       }
       const type = $('cardioType').value;
@@ -753,19 +812,23 @@
       const totalSeconds = minutes * 60 + secondsPart;
       const targetSeconds = type === 'run' ? cardio.run[state.level] : cardio.walk[state.level];
       const distance = type === 'run' ? cardio.runDistance : cardio.walkDistance;
-      const metTarget = totalSeconds <= targetSeconds;
+      const targetMiles = officialDistanceMiles(type, cardio);
+      const paceSeconds = Math.round(totalSeconds / miles);
+      const targetPaceSeconds = Math.round(targetSeconds / targetMiles);
+      const metTarget = paceSeconds <= targetPaceSeconds;
       const recordedAt = new Date().toISOString();
-      cardioHistory.unshift({ date: recordedAt, program: '5bx', sessionId: state.sessionId, type, seconds: totalSeconds, target: targetSeconds, distance, chart: state.chart, level: currentLevelLabel(), metTarget });
+      cardioHistory.unshift({ date: recordedAt, program: '5bx', sessionId: state.sessionId, type, seconds: totalSeconds, miles, paceSeconds, target: targetSeconds, targetPaceSeconds, distance, chart: state.chart, level: currentLevelLabel(), metTarget });
       localStorage.setItem('five-daily-cardio-history', JSON.stringify(cardioHistory));
       if (!state.startedAt) state.startedAt = Date.now();
-      state.cardioAlternative = { type, seconds: totalSeconds, target: targetSeconds, distance, metTarget, date: recordedAt };
-      saveExerciseResult(4, null, { mode: type, seconds: totalSeconds, targetSeconds, distance, metTarget });
+      state.cardioAlternative = { type, seconds: totalSeconds, miles, paceSeconds, target: targetSeconds, targetPaceSeconds, distance, metTarget, date: recordedAt };
+      saveExerciseResult(4, null, { mode: type, seconds: totalSeconds, miles, paceSeconds, targetSeconds, targetPaceSeconds, distance, metTarget });
       saveActiveWorkout();
-      const difference = Math.abs(targetSeconds - totalSeconds);
-      const targetResult = metTarget ? `${formatTargetTime(difference)} inside target` : `${formatTargetTime(difference)} over target`;
-      $('cardioFeedback').textContent = `Saved — Exercise 5 complete · ${targetResult}.`;
+      const difference = Math.abs(targetPaceSeconds - paceSeconds);
+      const targetResult = metTarget ? `${formatTargetTime(difference)} per mile inside target pace` : `${formatTargetTime(difference)} per mile over target pace`;
+      $('cardioFeedback').textContent = `Saved — Exercise 5 complete · average ${formatTargetTime(paceSeconds)} per mile · ${targetResult}.`;
       $('cardioMinutes').value = '';
       $('cardioSeconds').value = '';
+      updateCardioPacePreview();
       if (state.index === 4) {
         state.awaitingRecord = false;
         pauseTimer();
@@ -787,7 +850,7 @@
       const cardioSessions = program === '5bx' ? cardioHistory.filter(item => recordProgram(item) === '5bx' && item.chart === chart && item.level === level).map(item => ({
         date: item.date,
         type: item.type === 'run' ? 'Run' : 'Walk',
-        detail: `${item.distance} · ${item.metTarget ? 'target met' : 'target missed'}`,
+        detail: `${formatMiles(savedCardioMiles(item))} · ${formatTargetTime(savedCardioPace(item))}/mi · ${item.metTarget ? 'target met' : 'target missed'}`,
         seconds: item.seconds,
         successful: Boolean(item.metTarget)
       })) : [];
@@ -871,24 +934,25 @@
         if (!results.length) {
           return `<article class="exercise-chart"><div class="exercise-chart-head"><strong>${label} · ${distance}</strong><span>Target ${formatTargetTime(target)}</span></div><p class="chart-empty">No saved ${label.toLowerCase()} times at this level yet.</p></article>`;
         }
-        const values = results.map(item => Math.max(1, Number(item.seconds) || 1));
-        const minimum = Math.min(target, ...values);
-        const maximum = Math.max(target, ...values);
+        const targetPace = Math.round(target / officialDistanceMiles(type, cardio));
+        const values = results.map(item => Math.max(1, savedCardioPace(item)));
+        const minimum = Math.min(targetPace, ...values);
+        const maximum = Math.max(targetPace, ...values);
         const range = Math.max(1, maximum - minimum);
         const xFor = i => results.length === 1 ? 150 : 12 + (i * 276 / (results.length - 1));
         const yFor = value => 16 + ((value - minimum) / range * 78);
         const points = values.map((value, i) => `${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`).join(' ');
-        const circles = values.map((value, i) => `<circle class="chart-point" cx="${xFor(i).toFixed(1)}" cy="${yFor(value).toFixed(1)}" r="3.5"><title>${new Date(results[i].date).toLocaleDateString()}: ${formatTargetTime(value)}</title></circle>`).join('');
+        const circles = values.map((value, i) => `<circle class="chart-point" cx="${xFor(i).toFixed(1)}" cy="${yFor(value).toFixed(1)}" r="3.5"><title>${new Date(results[i].date).toLocaleDateString()}: ${formatTargetTime(value)}/mi over ${formatMiles(savedCardioMiles(results[i]))}</title></circle>`).join('');
         const firstDate = new Date(results[0].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         const lastDate = new Date(results[results.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         return `<article class="exercise-chart">
-          <div class="exercise-chart-head"><strong>${label} · ${distance}</strong><span>Latest ${formatTargetTime(values.at(-1))} · best ${formatTargetTime(Math.min(...values))}</span></div>
-          <svg viewBox="0 0 300 104" role="img" aria-label="${label} times for Chart ${chart}, Level ${level}; lower times are better">
+          <div class="exercise-chart-head"><strong>${label} · average pace</strong><span>Latest ${formatTargetTime(values.at(-1))}/mi · best ${formatTargetTime(Math.min(...values))}/mi</span></div>
+          <svg viewBox="0 0 300 104" role="img" aria-label="${label} average pace per mile for Chart ${chart}, Level ${level}; lower times are better">
             <line class="chart-grid" x1="12" y1="16" x2="288" y2="16"></line><line class="chart-grid" x1="12" y1="94" x2="288" y2="94"></line>
-            <line class="chart-target" x1="12" y1="${yFor(target).toFixed(1)}" x2="288" y2="${yFor(target).toFixed(1)}"><title>Target ${formatTargetTime(target)}</title></line>
+            <line class="chart-target" x1="12" y1="${yFor(targetPace).toFixed(1)}" x2="288" y2="${yFor(targetPace).toFixed(1)}"><title>Target pace ${formatTargetTime(targetPace)}/mi</title></line>
             <polyline class="chart-line" points="${points}"></polyline>${circles}
           </svg>
-          <div class="chart-legend"><span>${firstDate}</span><span>${results.length} attempt${results.length === 1 ? '' : 's'} · lower is better</span><span>${lastDate}</span></div>
+          <div class="chart-legend"><span>${firstDate}</span><span>${results.length} attempt${results.length === 1 ? '' : 's'} · target ${formatTargetTime(targetPace)}/mi</span><span>${lastDate}</span></div>
         </article>`;
       }).join('');
     }
@@ -966,6 +1030,13 @@
     $('programSelect').addEventListener('change', changeProgram);
     $('ageInput').addEventListener('change', renderPlanGuidance);
     $('saveCardioTime').addEventListener('click', saveCardioTime);
+    $('cardioType').addEventListener('change', () => {
+      $('cardioDistance').value = officialDistanceMiles($('cardioType').value, cardioAlternatives[state.chart]);
+      updateCardioPacePreview();
+    });
+    $('cardioDistance').addEventListener('input', updateCardioPacePreview);
+    $('cardioMinutes').addEventListener('input', updateCardioPacePreview);
+    $('cardioSeconds').addEventListener('input', updateCardioPacePreview);
     $('progressChartSelect').addEventListener('change', () => {
       const labels = levelLabels(state.program, Number($('progressChartSelect').value));
       $('progressLevelSelect').innerHTML = labels.map((level, i) => `<option value="${i}">${state.program === 'xbx' ? `Level ${level}` : level}</option>`).join('');

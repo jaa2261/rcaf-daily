@@ -12,7 +12,7 @@ An installable, offline-ready exercise timer and progress tracker based on the R
 - Individual exercise timers with audible countdowns during the final ten seconds.
 - A pause after each timer so the repetitions achieved can be entered before continuing.
 - Immediate saving after each exercise.
-- Walk and run timing as an alternative to 5BX Exercise 5; saving either marks Exercise 5 complete.
+- Walk and run timing as an alternative to 5BX Exercise 5, including total mileage, total elapsed time, and calculated average time per mile; saving either marks Exercise 5 complete.
 - Workout, repetition, walk, and run history by chart and level.
 - Progress graphs and the number of days spent at each level.
 - Age-based goals and minimum progression periods from the pamphlets.
@@ -101,4 +101,3 @@ No account, server database, or cloud synchronisation is used. Exercise history 
 - [XBX Plan for Physical Fitness — Government of Canada catalogue](https://publications.gc.ca/site/eng/9.956606/publication.html)
 
 The exercise illustrations and plan data were prepared from these historical pamphlets. This project is an unofficial tracker and is not affiliated with or endorsed by the Royal Canadian Air Force or the Government of Canada. The historical routines are not current medical guidance; users should exercise within their abilities and seek appropriate medical advice where necessary.
-
