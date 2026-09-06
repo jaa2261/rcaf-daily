@@ -1,7 +1,12 @@
-const CACHE_NAME = 'five-daily-v5';
+const CACHE_NAME = 'five-daily-v6';
 const EXERCISE_IMAGES = Array.from({ length: 6 }, (_, chart) =>
   Array.from({ length: 5 }, (_, exercise) =>
     `./assets/exercises/chart-${chart + 1}-exercise-${exercise + 1}.png`
+  )
+).flat();
+const XBX_IMAGES = Array.from({ length: 4 }, (_, chart) =>
+  Array.from({ length: 10 }, (_, exercise) =>
+    `./assets/xbx/chart-${chart + 1}-exercise-${exercise + 1}.png`
   )
 ).flat();
 
@@ -10,7 +15,8 @@ const APP_SHELL = [
   './index.html',
   './manifest.webmanifest',
   './assets/app-icon.svg',
-  ...EXERCISE_IMAGES
+  ...EXERCISE_IMAGES,
+  ...XBX_IMAGES
 ];
 
 self.addEventListener('install', event => {

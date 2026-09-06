@@ -1,7 +1,7 @@
 {
-  "name": "Five Daily — RCAF 5BX Tracker",
-  "short_name": "Five Daily",
-  "description": "An offline-ready timer and progress tracker for the Royal Canadian Air Force 5BX plan.",
+  "name": "RCAF Daily — 5BX & XBX Tracker",
+  "short_name": "RCAF Daily",
+  "description": "An offline-ready timer and progress tracker for the Royal Canadian Air Force 5BX and XBX plans.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
