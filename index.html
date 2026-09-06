@@ -70,6 +70,10 @@
     .btn.primary { min-width: 142px; color: #0b140f; background: var(--lime); border-color: var(--lime); }
     .btn.primary:hover { background: #d6ff77; }
     .btn.danger { color: #ffad91; }
+    .btn:disabled { cursor: not-allowed; opacity: .42; }
+    .btn:disabled:hover { background: rgba(255,255,255,.05); }
+    .record-prompt { margin: 8px 0 0 !important; color: #82968e !important; font-size: .78rem; }
+    .record-prompt.ready { color: var(--lime) !important; font-weight: 750; }
     .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; margin-top: 44px; }
     .step { position: relative; min-width: 0; padding: 13px 11px; color: #789087; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 13px; text-align: left; }
     .step span { display: block; font-size: .68rem; font-weight: 800; margin-bottom: 4px; }
@@ -187,6 +191,7 @@
             <p id="exerciseNote">Reach overhead, fold forward, then rise with control. Keep a steady rhythm.</p>
             <div class="target" id="targetCount">Target · 2 repetitions</div>
             <label class="rep-line">Completed <input id="repTarget" type="number" min="0" max="999" value="0" aria-label="Completed repetitions"></label>
+            <p class="record-prompt" id="recordPrompt">Your result unlocks when the timer reaches zero.</p>
           </div>
         </div>
 
@@ -313,9 +318,10 @@
 
     const $ = (id) => document.getElementById(id);
     const savedPlan = JSON.parse(localStorage.getItem('five-daily-plan') || '{}');
-    const state = { chart: savedPlan.chart || 1, level: savedPlan.level || 0, index: 0, remaining: times[0], running: false, interval: null, startedAt: null, completed: [0,0,0,0,0] };
+    const state = { chart: savedPlan.chart || 1, level: savedPlan.level || 0, index: 0, remaining: times[0], running: false, awaitingRecord: false, interval: null, startedAt: null, completed: [0,0,0,0,0] };
     let history = JSON.parse(localStorage.getItem('five-daily-history') || '[]');
     let cardioHistory = JSON.parse(localStorage.getItem('five-daily-cardio-history') || '[]');
+    let audioContext = null;
 
     function formatTime(seconds) {
       return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -323,6 +329,31 @@
 
     function formatTargetTime(seconds) {
       return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+
+    function unlockAudio() {
+      if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioContext.state === 'suspended') audioContext.resume();
+    }
+
+    function playTone(frequency, duration = .09, delay = 0) {
+      if (!audioContext) return;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const start = audioContext.currentTime + delay;
+      oscillator.type = 'sine';
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(.0001, start);
+      gain.gain.exponentialRampToValueAtTime(.16, start + .012);
+      gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+      oscillator.connect(gain).connect(audioContext.destination);
+      oscillator.start(start);
+      oscillator.stop(start + duration + .02);
+    }
+
+    function playCompletionChime() {
+      playTone(660, .15);
+      playTone(880, .22, .17);
     }
 
     function renderWorkout() {
@@ -336,26 +367,37 @@
       $('progressLabel').textContent = `Chart ${state.chart} · Level ${levels[state.level]} · Exercise ${state.index + 1} of 5`;
       $('targetCount').textContent = `Target · ${target} ${state.index === 4 ? 'steps' : 'repetitions'}`;
       $('repTarget').value = state.completed[state.index];
+      $('repTarget').disabled = !state.awaitingRecord;
       $('time').textContent = formatTime(state.remaining);
       $('dial').style.setProperty('--progress', `${360 * (1 - state.remaining / times[state.index])}deg`);
-      $('startPause').textContent = state.running ? 'Pause' : state.remaining < times[state.index] ? 'Resume' : 'Start';
-      $('nextExercise').textContent = state.index === 4 ? 'Finish workout' : 'Complete exercise';
+      $('startPause').textContent = state.awaitingRecord ? 'Time complete' : state.running ? 'Pause' : state.remaining < times[state.index] ? 'Resume' : 'Start';
+      $('startPause').disabled = state.awaitingRecord;
+      $('nextExercise').textContent = state.awaitingRecord ? (state.index === 4 ? 'Save & finish workout' : 'Save reps & continue') : 'Complete the timer first';
+      $('nextExercise').disabled = !state.awaitingRecord;
+      $('recordPrompt').textContent = state.awaitingRecord ? `Time complete — enter the ${state.index === 4 ? 'steps' : 'repetitions'} achieved, then save.` : 'Your result unlocks when the timer reaches zero.';
+      $('recordPrompt').classList.toggle('ready', state.awaitingRecord);
       $('levelBadge').textContent = `${state.chart} · ${levels[state.level]}`;
       $('steps').innerHTML = variations[state.chart].map((item, i) => `
-        <button class="step ${i < state.index ? 'done' : ''} ${i === state.index ? 'active' : ''}" data-index="${i}" aria-label="Go to ${item[0]}">
+        <div class="step ${i < state.index ? 'done' : ''} ${i === state.index ? 'active' : ''}" aria-label="${item[0]}${i < state.index ? ', complete' : i === state.index ? ', current exercise' : ''}">
           <span>${i < state.index ? '✓ Done' : `0${i + 1}`} · ${times[i] / 60}m</span><b>${item[0]}</b>
-        </button>`).join('');
-      document.querySelectorAll('.step').forEach(button => button.addEventListener('click', () => goToExercise(Number(button.dataset.index))));
+        </div>`).join('');
     }
 
     function toggleTimer() {
+      if (state.awaitingRecord || state.remaining <= 0) return;
       if (state.running) return pauseTimer();
+      unlockAudio();
       if (!state.startedAt) state.startedAt = Date.now();
       state.running = true;
       state.interval = setInterval(() => {
-        state.remaining--;
-        if (state.remaining <= 0) nextExercise();
-        else renderWorkout();
+        state.remaining = Math.max(0, state.remaining - 1);
+        if (state.remaining > 0 && state.remaining <= 10) playTone(state.remaining <= 3 ? 1040 : 820);
+        if (state.remaining === 0) {
+          state.awaitingRecord = true;
+          playCompletionChime();
+          pauseTimer();
+          setTimeout(() => $('repTarget').focus(), 50);
+        } else renderWorkout();
       }, 1000);
       renderWorkout();
     }
@@ -366,19 +408,14 @@
       renderWorkout();
     }
 
-    function goToExercise(index) {
-      pauseTimer();
-      state.index = index;
-      state.remaining = times[index];
-      renderWorkout();
-    }
-
     function nextExercise() {
+      if (!state.awaitingRecord) return;
       state.completed[state.index] = Math.max(0, Number($('repTarget').value) || 0);
       pauseTimer();
       if (state.index < 4) {
         state.index++;
         state.remaining = times[state.index];
+        state.awaitingRecord = false;
         renderWorkout();
       } else finishWorkout();
     }
@@ -399,6 +436,7 @@
       pauseTimer();
       state.index = 0;
       state.remaining = times[0];
+      state.awaitingRecord = false;
       state.startedAt = null;
       state.completed = [0,0,0,0,0];
       $('completeScreen').classList.toggle('show', showComplete);
@@ -592,7 +630,7 @@
     });
     async function seedAndroidOfflineCopy() {
       if (!('caches' in window)) return;
-      const cache = await caches.open('five-daily-v2');
+      const cache = await caches.open('five-daily-v3');
       let pageResponse = null;
       try {
         const response = await fetch('./index.html', { credentials: 'include', cache: 'reload' });
