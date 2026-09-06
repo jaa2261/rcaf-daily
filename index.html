@@ -121,6 +121,22 @@
     .level-day strong { display: block; margin-top: 2px; color: var(--ink); font-size: .85rem; }
     .level-records { max-height: 390px; overflow: auto; padding-right: 4px; }
     .level-records li b { white-space: nowrap; }
+    .progress-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: -4px 0 18px; }
+    .progress-filters label { display: grid; gap: 5px; color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+    .progress-filters select { width: 100%; }
+    .exercise-charts { display: grid; gap: 12px; }
+    .exercise-chart { padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.025); }
+    .exercise-chart-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .exercise-chart-head strong { font-size: .84rem; }
+    .exercise-chart-head span { color: var(--lime); font-size: .76rem; font-weight: 800; white-space: nowrap; }
+    .exercise-chart svg { display: block; width: 100%; height: 104px; margin-top: 8px; overflow: visible; }
+    .chart-grid { stroke: rgba(255,255,255,.08); stroke-width: 1; }
+    .chart-target { stroke: rgba(255,120,73,.85); stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .chart-line { fill: none; stroke: var(--lime); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .chart-point { fill: var(--panel); stroke: var(--lime); stroke-width: 2.5; }
+    .chart-empty { margin: 12px 0 2px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+    .chart-legend { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: #7f948b; font-size: .68rem; }
+    .saved-status { min-height: 1.35em; margin: 12px 0 0; color: var(--lime); font-size: .8rem; font-weight: 750; }
     .target { color: var(--lime); font-size: 1rem; font-weight: 850; }
     .source { display: block; margin-top: 18px; color: #81968d; font-size: .75rem; line-height: 1.45; }
     .source a { color: #a9bdb4; }
@@ -200,6 +216,7 @@
           <button class="btn" id="nextExercise">Complete exercise</button>
           <button class="btn danger" id="resetWorkout">Reset</button>
         </div>
+        <p class="saved-status" id="savedStatus" role="status"></p>
         <div class="steps" id="steps" aria-label="Workout exercises"></div>
       </section>
 
@@ -236,6 +253,14 @@
           <ul class="history level-records" id="levelHistory"></ul>
           <h4 class="eyebrow" id="chartDaysLabel" style="margin-top:20px">Days on Chart 1</h4>
           <div class="level-days" id="levelDays"></div>
+        </section>
+        <section class="card side-card">
+          <div class="side-head"><h3>Exercise progress</h3><span class="total" id="progressSessionCount">0 results</span></div>
+          <div class="progress-filters">
+            <label>Chart<select id="progressChartSelect" aria-label="Progress chart"></select></label>
+            <label>Level<select id="progressLevelSelect" aria-label="Progress level"></select></label>
+          </div>
+          <div class="exercise-charts" id="exerciseCharts"></div>
         </section>
         <section class="card side-card">
           <div class="side-head"><h3>This week</h3><span class="total" id="weekTotal">0 sessions</span></div>
@@ -317,11 +342,68 @@
     };
 
     const $ = (id) => document.getElementById(id);
-    const savedPlan = JSON.parse(localStorage.getItem('five-daily-plan') || '{}');
-    const state = { chart: savedPlan.chart || 1, level: savedPlan.level || 0, index: 0, remaining: times[0], running: false, awaitingRecord: false, interval: null, startedAt: null, completed: [0,0,0,0,0] };
-    let history = JSON.parse(localStorage.getItem('five-daily-history') || '[]');
-    let cardioHistory = JSON.parse(localStorage.getItem('five-daily-cardio-history') || '[]');
+    function readSaved(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+      catch { return fallback; }
+    }
+    function makeSessionId() {
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    }
+    const savedPlan = readSaved('five-daily-plan', {});
+    const savedWorkout = readSaved('five-daily-active-workout', null);
+    const restoredWorkout = savedWorkout && Array.isArray(savedWorkout.completed) && savedWorkout.index >= 0 && savedWorkout.index < 5;
+    const initialChart = restoredWorkout ? Number(savedWorkout.chart) : Number(savedPlan.chart || 1);
+    const initialLevel = restoredWorkout ? Number(savedWorkout.level) : Number(savedPlan.level || 0);
+    const initialIndex = restoredWorkout ? Number(savedWorkout.index) : 0;
+    const state = {
+      chart: initialChart,
+      level: initialLevel,
+      index: initialIndex,
+      remaining: restoredWorkout ? Math.max(0, Number(savedWorkout.remaining ?? times[initialIndex])) : times[0],
+      running: false,
+      awaitingRecord: restoredWorkout ? Boolean(savedWorkout.awaitingRecord) : false,
+      interval: null,
+      startedAt: restoredWorkout ? Number(savedWorkout.startedAt) || null : null,
+      sessionId: restoredWorkout ? savedWorkout.sessionId : makeSessionId(),
+      completed: restoredWorkout ? savedWorkout.completed.map(value => Math.max(0, Number(value) || 0)).slice(0, 5) : [0,0,0,0,0]
+    };
+    while (state.completed.length < 5) state.completed.push(0);
+    let history = readSaved('five-daily-history', []);
+    let cardioHistory = readSaved('five-daily-cardio-history', []);
+    let exerciseHistory = readSaved('five-daily-exercise-history', []);
     let audioContext = null;
+
+    function saveActiveWorkout() {
+      localStorage.setItem('five-daily-active-workout', JSON.stringify({
+        chart: state.chart,
+        level: state.level,
+        index: state.index,
+        remaining: state.remaining,
+        awaitingRecord: state.awaitingRecord,
+        startedAt: state.startedAt,
+        sessionId: state.sessionId,
+        completed: state.completed
+      }));
+    }
+
+    function saveExerciseResult(index, reps) {
+      const id = `${state.sessionId}-${index}`;
+      const result = {
+        id,
+        sessionId: state.sessionId,
+        date: new Date().toISOString(),
+        chart: state.chart,
+        level: levels[state.level],
+        exercise: index + 1,
+        reps,
+        target: targets[state.chart][state.level][index]
+      };
+      const existingIndex = exerciseHistory.findIndex(item => item.id === id);
+      if (existingIndex >= 0) exerciseHistory[existingIndex] = result;
+      else exerciseHistory.push(result);
+      localStorage.setItem('five-daily-exercise-history', JSON.stringify(exerciseHistory));
+      $('savedStatus').textContent = `Exercise ${index + 1} saved · ${reps} ${index === 4 ? 'steps' : 'reps'}`;
+    }
 
     function formatTime(seconds) {
       return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -388,12 +470,14 @@
       if (state.running) return pauseTimer();
       unlockAudio();
       if (!state.startedAt) state.startedAt = Date.now();
+      saveActiveWorkout();
       state.running = true;
       state.interval = setInterval(() => {
         state.remaining = Math.max(0, state.remaining - 1);
         if (state.remaining > 0 && state.remaining <= 10) playTone(state.remaining <= 3 ? 1040 : 820);
         if (state.remaining === 0) {
           state.awaitingRecord = true;
+          saveActiveWorkout();
           playCompletionChime();
           pauseTimer();
           setTimeout(() => $('repTarget').focus(), 50);
@@ -410,13 +494,18 @@
 
     function nextExercise() {
       if (!state.awaitingRecord) return;
-      state.completed[state.index] = Math.max(0, Number($('repTarget').value) || 0);
+      const completedIndex = state.index;
+      const completedReps = Math.max(0, Number($('repTarget').value) || 0);
+      state.completed[completedIndex] = completedReps;
+      state.awaitingRecord = false;
+      saveExerciseResult(completedIndex, completedReps);
       pauseTimer();
       if (state.index < 4) {
         state.index++;
         state.remaining = times[state.index];
-        state.awaitingRecord = false;
+        saveActiveWorkout();
         renderWorkout();
+        renderExerciseCharts();
       } else finishWorkout();
     }
 
@@ -425,8 +514,9 @@
       const duration = Math.max(1, Math.round(durationSeconds / 60));
       const targetSet = targets[state.chart][state.level];
       const passed = state.completed.every((count, i) => count >= targetSet[i]);
-      history.unshift({ date: new Date().toISOString(), duration, durationSeconds, reps: state.completed.reduce((a, b) => a + b, 0), chart: state.chart, level: levels[state.level], passed });
+      history.unshift({ date: new Date().toISOString(), sessionId: state.sessionId, duration, durationSeconds, completed: [...state.completed], reps: state.completed.reduce((a, b) => a + b, 0), chart: state.chart, level: levels[state.level], passed });
       localStorage.setItem('five-daily-history', JSON.stringify(history));
+      localStorage.removeItem('five-daily-active-workout');
       $('completeSummary').textContent = passed ? `Chart ${state.chart}, Level ${levels[state.level]} cleared in ${formatTargetTime(durationSeconds)}.` : `Session saved at ${formatTargetTime(durationSeconds)}. Repeat this level until every target is met within 11 minutes.`;
       $('completeScreen').classList.add('show');
       renderProgress();
@@ -438,7 +528,10 @@
       state.remaining = times[0];
       state.awaitingRecord = false;
       state.startedAt = null;
+      state.sessionId = makeSessionId();
       state.completed = [0,0,0,0,0];
+      localStorage.removeItem('five-daily-active-workout');
+      $('savedStatus').textContent = '';
       $('completeScreen').classList.toggle('show', showComplete);
       renderWorkout();
     }
@@ -546,7 +639,10 @@
     }
 
     function uniqueTrainingDays(chart, level) {
-      return new Set(sessionsFor(chart, level).map(item => dayKey(item.date))).size;
+      const dates = sessionsFor(chart, level).map(item => item.date).concat(
+        exerciseHistory.filter(item => Number(item.chart) === Number(chart) && item.level === level).map(item => item.date)
+      );
+      return new Set(dates.map(dayKey)).size;
     }
 
     function renderLevelHistory() {
@@ -560,6 +656,43 @@
       $('levelDays').innerHTML = levels.map((item, index) => {
         const days = uniqueTrainingDays(state.chart, item);
         return `<div class="level-day ${index === state.level ? 'active' : ''}" title="Chart ${state.chart}, Level ${item}: ${days} training days"><span>${item}</span><strong>${days}</strong></div>`;
+      }).join('');
+    }
+
+    function renderExerciseCharts() {
+      const chart = Number($('progressChartSelect').value || state.chart);
+      const levelIndex = Number($('progressLevelSelect').value ?? state.level);
+      const level = levels[levelIndex];
+      const levelResults = exerciseHistory
+        .filter(item => Number(item.chart) === chart && item.level === level)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+      const sessionCount = new Set(levelResults.map(item => item.sessionId || item.date)).size;
+      $('progressSessionCount').textContent = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
+      $('exerciseCharts').innerHTML = variations[chart].map((exercise, index) => {
+        const results = levelResults.filter(item => Number(item.exercise) === index + 1);
+        const target = targets[chart][levelIndex][index];
+        if (!results.length) {
+          return `<article class="exercise-chart"><div class="exercise-chart-head"><strong>${index + 1}. ${exercise[0]}</strong><span>Target ${target}</span></div><p class="chart-empty">No saved results at this level yet.</p></article>`;
+        }
+        const values = results.map(item => Math.max(0, Number(item.reps) || 0));
+        const ceiling = Math.max(1, target, ...values);
+        const xFor = i => results.length === 1 ? 150 : 12 + (i * 276 / (results.length - 1));
+        const yFor = value => 94 - (Math.min(value, ceiling) / ceiling * 78);
+        const points = values.map((value, i) => `${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`).join(' ');
+        const circles = values.map((value, i) => `<circle class="chart-point" cx="${xFor(i).toFixed(1)}" cy="${yFor(value).toFixed(1)}" r="3.5"><title>${new Date(results[i].date).toLocaleDateString()}: ${value}</title></circle>`).join('');
+        const targetY = yFor(target).toFixed(1);
+        const firstDate = new Date(results[0].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const lastDate = new Date(results[results.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const latest = values[values.length - 1];
+        return `<article class="exercise-chart">
+          <div class="exercise-chart-head"><strong>${index + 1}. ${exercise[0]}</strong><span>Latest ${latest} · best ${Math.max(...values)}</span></div>
+          <svg viewBox="0 0 300 104" role="img" aria-label="${exercise[0]} results for Chart ${chart}, Level ${level}">
+            <line class="chart-grid" x1="12" y1="16" x2="288" y2="16"></line><line class="chart-grid" x1="12" y1="94" x2="288" y2="94"></line>
+            <line class="chart-target" x1="12" y1="${targetY}" x2="288" y2="${targetY}"><title>Target ${target}</title></line>
+            <polyline class="chart-line" points="${points}"></polyline>${circles}
+          </svg>
+          <div class="chart-legend"><span>${firstDate}</span><span>${results.length} result${results.length === 1 ? '' : 's'} · target ${target}</span><span>${lastDate}</span></div>
+        </article>`;
       }).join('');
     }
 
@@ -580,19 +713,27 @@
       $('history').innerHTML = history.length ? history.slice(0, 4).map(item => `<li><div><time>${new Date(item.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time><small>${item.chart ? `Chart ${item.chart} · ${item.level} · ` : ''}${item.passed ? 'cleared' : 'practised'}</small></div><b>${formatTargetTime(item.durationSeconds || (item.duration || 11) * 60)}</b></li>`).join('') : '<li class="empty">Your completed workouts will appear here.</li>';
       renderPlanGuidance();
       renderLevelHistory();
+      renderExerciseCharts();
     }
 
     $('chartSelect').innerHTML = Object.keys(targets).map(n => `<option value="${n}">Chart ${n}</option>`).join('');
     $('levelSelect').innerHTML = levels.map((level, i) => `<option value="${i}">${level}</option>`).join('');
+    $('progressChartSelect').innerHTML = Object.keys(targets).map(n => `<option value="${n}">Chart ${n}</option>`).join('');
+    $('progressLevelSelect').innerHTML = levels.map((level, i) => `<option value="${i}">${level}</option>`).join('');
     $('chartSelect').value = state.chart;
     $('levelSelect').value = state.level;
+    $('progressChartSelect').value = state.chart;
+    $('progressLevelSelect').value = state.level;
     $('ageInput').value = localStorage.getItem('five-daily-age') || '';
+    if (restoredWorkout) $('savedStatus').textContent = `Restored your saved workout at Exercise ${state.index + 1}.`;
     function changePlan() {
       pauseTimer();
       state.chart = Number($('chartSelect').value);
       state.level = Number($('levelSelect').value);
       localStorage.setItem('five-daily-plan', JSON.stringify({ chart: state.chart, level: state.level }));
       resetWorkout(false);
+      $('progressChartSelect').value = state.chart;
+      $('progressLevelSelect').value = state.level;
       renderProgress();
     }
 
@@ -605,6 +746,8 @@
     $('levelSelect').addEventListener('change', changePlan);
     $('ageInput').addEventListener('change', renderPlanGuidance);
     $('saveCardioTime').addEventListener('click', saveCardioTime);
+    $('progressChartSelect').addEventListener('change', renderExerciseCharts);
+    $('progressLevelSelect').addEventListener('change', renderExerciseCharts);
     renderWorkout();
     renderProgress();
 
@@ -630,7 +773,7 @@
     });
     async function seedAndroidOfflineCopy() {
       if (!('caches' in window)) return;
-      const cache = await caches.open('five-daily-v3');
+      const cache = await caches.open('five-daily-v4');
       let pageResponse = null;
       try {
         const response = await fetch('./index.html', { credentials: 'include', cache: 'reload' });

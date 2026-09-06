@@ -1,4 +1,4 @@
-const CACHE_NAME = 'five-daily-v3';
+const CACHE_NAME = 'five-daily-v4';
 const EXERCISE_IMAGES = Array.from({ length: 6 }, (_, chart) =>
   Array.from({ length: 5 }, (_, exercise) =>
     `./assets/exercises/chart-${chart + 1}-exercise-${exercise + 1}.png`
