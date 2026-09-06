@@ -1,0 +1,21 @@
+{
+  "name": "Five Daily — RCAF 5BX Tracker",
+  "short_name": "Five Daily",
+  "description": "An offline-ready timer and progress tracker for the Royal Canadian Air Force 5BX plan.",
+  "id": "./",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#08120f",
+  "theme_color": "#08120f",
+  "categories": ["fitness", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "assets/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Five Daily app icon">
+  <rect width="512" height="512" rx="112" fill="#c7ff4a"/>
+  <circle cx="256" cy="256" r="172" fill="none" stroke="#08120f" stroke-width="18" opacity=".18"/>
+  <path d="M337 117H196l-18 142c25-13 52-20 81-20 51 0 91 28 91 78 0 55-45 91-112 91-42 0-79-13-105-33l30-53c21 15 47 24 71 24 30 0 47-12 47-31 0-20-18-31-54-31-28 0-58 8-79 20l-34-23 29-222h194v58Z" fill="#08120f"/>
+</svg>
