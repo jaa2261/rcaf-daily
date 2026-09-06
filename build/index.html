@@ -571,10 +571,14 @@
     renderProgress();
 
     let installPrompt = null;
+    let offlineReady = false;
+    function updateInstallButton() {
+      $('installApp').hidden = !(installPrompt && offlineReady);
+    }
     window.addEventListener('beforeinstallprompt', event => {
       event.preventDefault();
       installPrompt = event;
-      $('installApp').hidden = false;
+      updateInstallButton();
     });
     $('installApp').addEventListener('click', async () => {
       if (!installPrompt) return;
@@ -620,6 +624,8 @@
         await navigator.serviceWorker.register('./sw.js');
         await navigator.serviceWorker.ready;
         await seedAndroidOfflineCopy();
+        offlineReady = true;
+        updateInstallButton();
       });
     }
   </script>
