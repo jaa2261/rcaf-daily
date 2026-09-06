@@ -136,6 +136,7 @@
     .chart-point { fill: var(--panel); stroke: var(--lime); stroke-width: 2.5; }
     .chart-empty { margin: 12px 0 2px; color: var(--muted); font-size: .78rem; line-height: 1.45; }
     .chart-legend { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; color: #7f948b; font-size: .68rem; }
+    .progress-subhead { margin: 22px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; }
     .saved-status { min-height: 1.35em; margin: 12px 0 0; color: var(--lime); font-size: .8rem; font-weight: 750; }
     .target { color: var(--lime); font-size: 1rem; font-weight: 850; }
     .source { display: block; margin-top: 18px; color: #81968d; font-size: .75rem; line-height: 1.45; }
@@ -230,10 +231,10 @@
             <h4>Exercise 5 alternatives</h4>
             <div class="alternative-row"><span>Run</span><strong id="runAlternative">½ mile · 8:00</strong></div>
             <div class="alternative-row"><span>Walk</span><strong id="walkAlternative">1 mile · 21:00</strong></div>
-            <p class="alternative-note">Use either option instead of the six-minute stationary run. Complete the stated distance within the time shown.</p>
+            <p class="alternative-note">Use either option instead of the six-minute stationary run. Saving a time marks Exercise 5 complete; meeting the shown time is still required to clear the level.</p>
             <div class="cardio-log">
               <label for="cardioType">Record an attempt
-                <select id="cardioType"><option value="run">Run</option><option value="walk">Walk</option></select>
+                <select id="cardioType"><option value="walk">Walk</option><option value="run">Run</option></select>
               </label>
               <div class="time-entry" aria-label="Time taken">
                 <input id="cardioMinutes" type="number" min="0" max="180" inputmode="numeric" placeholder="min" aria-label="Minutes">
@@ -261,6 +262,8 @@
             <label>Level<select id="progressLevelSelect" aria-label="Progress level"></select></label>
           </div>
           <div class="exercise-charts" id="exerciseCharts"></div>
+          <h4 class="progress-subhead">Run &amp; walk progress</h4>
+          <div class="exercise-charts" id="cardioCharts"></div>
         </section>
         <section class="card side-card">
           <div class="side-head"><h3>This week</h3><span class="total" id="weekTotal">0 sessions</span></div>
@@ -365,6 +368,7 @@
       interval: null,
       startedAt: restoredWorkout ? Number(savedWorkout.startedAt) || null : null,
       sessionId: restoredWorkout ? savedWorkout.sessionId : makeSessionId(),
+      cardioAlternative: restoredWorkout ? savedWorkout.cardioAlternative || null : null,
       completed: restoredWorkout ? savedWorkout.completed.map(value => Math.max(0, Number(value) || 0)).slice(0, 5) : [0,0,0,0,0]
     };
     while (state.completed.length < 5) state.completed.push(0);
@@ -382,11 +386,12 @@
         awaitingRecord: state.awaitingRecord,
         startedAt: state.startedAt,
         sessionId: state.sessionId,
+        cardioAlternative: state.cardioAlternative,
         completed: state.completed
       }));
     }
 
-    function saveExerciseResult(index, reps) {
+    function saveExerciseResult(index, reps, details = {}) {
       const id = `${state.sessionId}-${index}`;
       const result = {
         id,
@@ -396,13 +401,14 @@
         level: levels[state.level],
         exercise: index + 1,
         reps,
-        target: targets[state.chart][state.level][index]
+        target: targets[state.chart][state.level][index],
+        ...details
       };
       const existingIndex = exerciseHistory.findIndex(item => item.id === id);
       if (existingIndex >= 0) exerciseHistory[existingIndex] = result;
       else exerciseHistory.push(result);
       localStorage.setItem('five-daily-exercise-history', JSON.stringify(exerciseHistory));
-      $('savedStatus').textContent = `Exercise ${index + 1} saved · ${reps} ${index === 4 ? 'steps' : 'reps'}`;
+      $('savedStatus').textContent = details.mode ? `Exercise 5 saved · ${details.mode === 'walk' ? 'walk' : 'run'} ${formatTargetTime(details.seconds)}` : `Exercise ${index + 1} saved · ${reps} ${index === 4 ? 'steps' : 'reps'}`;
     }
 
     function formatTime(seconds) {
@@ -459,10 +465,13 @@
       $('recordPrompt').textContent = state.awaitingRecord ? `Time complete — enter the ${state.index === 4 ? 'steps' : 'repetitions'} achieved, then save.` : 'Your result unlocks when the timer reaches zero.';
       $('recordPrompt').classList.toggle('ready', state.awaitingRecord);
       $('levelBadge').textContent = `${state.chart} · ${levels[state.level]}`;
-      $('steps').innerHTML = variations[state.chart].map((item, i) => `
-        <div class="step ${i < state.index ? 'done' : ''} ${i === state.index ? 'active' : ''}" aria-label="${item[0]}${i < state.index ? ', complete' : i === state.index ? ', current exercise' : ''}">
-          <span>${i < state.index ? '✓ Done' : `0${i + 1}`} · ${times[i] / 60}m</span><b>${item[0]}</b>
-        </div>`).join('');
+      $('steps').innerHTML = variations[state.chart].map((item, i) => {
+        const done = i < state.index || (i === 4 && Boolean(state.cardioAlternative));
+        const active = i === state.index && !done;
+        return `<div class="step ${done ? 'done' : ''} ${active ? 'active' : ''}" aria-label="${item[0]}${done ? ', complete' : active ? ', current exercise' : ''}">
+          <span>${done ? '✓ Done' : `0${i + 1}`} · ${times[i] / 60}m</span><b>${i === 4 && state.cardioAlternative ? `${state.cardioAlternative.type === 'walk' ? 'Walk' : 'Run'} alternative` : item[0]}</b>
+        </div>`;
+      }).join('');
     }
 
     function toggleTimer() {
@@ -504,8 +513,11 @@
         state.index++;
         state.remaining = times[state.index];
         saveActiveWorkout();
-        renderWorkout();
-        renderExerciseCharts();
+        if (state.index === 4 && state.cardioAlternative) finishWorkout();
+        else {
+          renderWorkout();
+          renderExerciseCharts();
+        }
       } else finishWorkout();
     }
 
@@ -513,11 +525,14 @@
       const durationSeconds = state.startedAt ? Math.max(1, Math.round((Date.now() - state.startedAt) / 1000)) : 660;
       const duration = Math.max(1, Math.round(durationSeconds / 60));
       const targetSet = targets[state.chart][state.level];
-      const passed = state.completed.every((count, i) => count >= targetSet[i]);
-      history.unshift({ date: new Date().toISOString(), sessionId: state.sessionId, duration, durationSeconds, completed: [...state.completed], reps: state.completed.reduce((a, b) => a + b, 0), chart: state.chart, level: levels[state.level], passed });
+      const firstFourPassed = state.completed.slice(0, 4).every((count, i) => count >= targetSet[i]);
+      const fifthPassed = state.cardioAlternative ? Boolean(state.cardioAlternative.metTarget) : state.completed[4] >= targetSet[4];
+      const passed = firstFourPassed && fifthPassed;
+      history.unshift({ date: new Date().toISOString(), sessionId: state.sessionId, duration, durationSeconds, completed: [...state.completed], cardioAlternative: state.cardioAlternative, reps: state.completed.reduce((a, b) => a + b, 0), chart: state.chart, level: levels[state.level], passed });
       localStorage.setItem('five-daily-history', JSON.stringify(history));
       localStorage.removeItem('five-daily-active-workout');
-      $('completeSummary').textContent = passed ? `Chart ${state.chart}, Level ${levels[state.level]} cleared in ${formatTargetTime(durationSeconds)}.` : `Session saved at ${formatTargetTime(durationSeconds)}. Repeat this level until every target is met within 11 minutes.`;
+      const alternative = state.cardioAlternative ? ` Exercise 5 completed with a ${state.cardioAlternative.type}.` : '';
+      $('completeSummary').textContent = passed ? `Chart ${state.chart}, Level ${levels[state.level]} cleared in ${formatTargetTime(durationSeconds)}.${alternative}` : `Session saved at ${formatTargetTime(durationSeconds)}.${alternative} Repeat this level until every target is met.`;
       $('completeScreen').classList.add('show');
       renderProgress();
     }
@@ -529,6 +544,7 @@
       state.awaitingRecord = false;
       state.startedAt = null;
       state.sessionId = makeSessionId();
+      state.cardioAlternative = null;
       state.completed = [0,0,0,0,0];
       localStorage.removeItem('five-daily-active-workout');
       $('savedStatus').textContent = '';
@@ -610,14 +626,26 @@
       const targetSeconds = type === 'run' ? cardio.run[state.level] : cardio.walk[state.level];
       const distance = type === 'run' ? cardio.runDistance : cardio.walkDistance;
       const metTarget = totalSeconds <= targetSeconds;
-      cardioHistory.unshift({ date: new Date().toISOString(), type, seconds: totalSeconds, target: targetSeconds, distance, chart: state.chart, level: levels[state.level], metTarget });
+      const recordedAt = new Date().toISOString();
+      cardioHistory.unshift({ date: recordedAt, sessionId: state.sessionId, type, seconds: totalSeconds, target: targetSeconds, distance, chart: state.chart, level: levels[state.level], metTarget });
       localStorage.setItem('five-daily-cardio-history', JSON.stringify(cardioHistory));
+      if (!state.startedAt) state.startedAt = Date.now();
+      state.cardioAlternative = { type, seconds: totalSeconds, target: targetSeconds, distance, metTarget, date: recordedAt };
+      saveExerciseResult(4, null, { mode: type, seconds: totalSeconds, targetSeconds, distance, metTarget });
+      saveActiveWorkout();
       const difference = Math.abs(targetSeconds - totalSeconds);
-      $('cardioFeedback').textContent = metTarget ? `Saved — ${formatTargetTime(difference)} inside the ${formatTargetTime(targetSeconds)} target.` : `Saved — ${formatTargetTime(difference)} over the ${formatTargetTime(targetSeconds)} target.`;
+      const targetResult = metTarget ? `${formatTargetTime(difference)} inside target` : `${formatTargetTime(difference)} over target`;
+      $('cardioFeedback').textContent = `Saved — Exercise 5 complete · ${targetResult}.`;
       $('cardioMinutes').value = '';
       $('cardioSeconds').value = '';
-      renderCardioHistory();
-      renderLevelHistory();
+      if (state.index === 4) {
+        state.awaitingRecord = false;
+        pauseTimer();
+        finishWorkout();
+      } else {
+        renderWorkout();
+        renderProgress();
+      }
     }
 
     function sessionsFor(chart, level) {
@@ -669,7 +697,7 @@
       const sessionCount = new Set(levelResults.map(item => item.sessionId || item.date)).size;
       $('progressSessionCount').textContent = `${sessionCount} session${sessionCount === 1 ? '' : 's'}`;
       $('exerciseCharts').innerHTML = variations[chart].map((exercise, index) => {
-        const results = levelResults.filter(item => Number(item.exercise) === index + 1);
+        const results = levelResults.filter(item => Number(item.exercise) === index + 1 && !item.mode);
         const target = targets[chart][levelIndex][index];
         if (!results.length) {
           return `<article class="exercise-chart"><div class="exercise-chart-head"><strong>${index + 1}. ${exercise[0]}</strong><span>Target ${target}</span></div><p class="chart-empty">No saved results at this level yet.</p></article>`;
@@ -692,6 +720,46 @@
             <polyline class="chart-line" points="${points}"></polyline>${circles}
           </svg>
           <div class="chart-legend"><span>${firstDate}</span><span>${results.length} result${results.length === 1 ? '' : 's'} · target ${target}</span><span>${lastDate}</span></div>
+        </article>`;
+      }).join('');
+      renderCardioCharts(chart, levelIndex);
+    }
+
+    function renderCardioCharts(chart, levelIndex) {
+      const level = levels[levelIndex];
+      const cardio = cardioAlternatives[chart];
+      $('cardioCharts').innerHTML = ['walk', 'run'].map(type => {
+        const isWalk = type === 'walk';
+        const target = isWalk ? cardio.walk?.[levelIndex] : cardio.run[levelIndex];
+        const label = isWalk ? 'Walk' : 'Run';
+        const distance = isWalk ? cardio.walkDistance : cardio.runDistance;
+        if (!target) {
+          return `<article class="exercise-chart"><div class="exercise-chart-head"><strong>${label}</strong><span>Not listed</span></div><p class="chart-empty">The pamphlet does not list a ${label.toLowerCase()} alternative for Chart ${chart}.</p></article>`;
+        }
+        const results = cardioHistory
+          .filter(item => Number(item.chart) === chart && item.level === level && item.type === type)
+          .sort((a, b) => new Date(a.date) - new Date(b.date));
+        if (!results.length) {
+          return `<article class="exercise-chart"><div class="exercise-chart-head"><strong>${label} · ${distance}</strong><span>Target ${formatTargetTime(target)}</span></div><p class="chart-empty">No saved ${label.toLowerCase()} times at this level yet.</p></article>`;
+        }
+        const values = results.map(item => Math.max(1, Number(item.seconds) || 1));
+        const minimum = Math.min(target, ...values);
+        const maximum = Math.max(target, ...values);
+        const range = Math.max(1, maximum - minimum);
+        const xFor = i => results.length === 1 ? 150 : 12 + (i * 276 / (results.length - 1));
+        const yFor = value => 16 + ((value - minimum) / range * 78);
+        const points = values.map((value, i) => `${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`).join(' ');
+        const circles = values.map((value, i) => `<circle class="chart-point" cx="${xFor(i).toFixed(1)}" cy="${yFor(value).toFixed(1)}" r="3.5"><title>${new Date(results[i].date).toLocaleDateString()}: ${formatTargetTime(value)}</title></circle>`).join('');
+        const firstDate = new Date(results[0].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const lastDate = new Date(results[results.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return `<article class="exercise-chart">
+          <div class="exercise-chart-head"><strong>${label} · ${distance}</strong><span>Latest ${formatTargetTime(values.at(-1))} · best ${formatTargetTime(Math.min(...values))}</span></div>
+          <svg viewBox="0 0 300 104" role="img" aria-label="${label} times for Chart ${chart}, Level ${level}; lower times are better">
+            <line class="chart-grid" x1="12" y1="16" x2="288" y2="16"></line><line class="chart-grid" x1="12" y1="94" x2="288" y2="94"></line>
+            <line class="chart-target" x1="12" y1="${yFor(target).toFixed(1)}" x2="288" y2="${yFor(target).toFixed(1)}"><title>Target ${formatTargetTime(target)}</title></line>
+            <polyline class="chart-line" points="${points}"></polyline>${circles}
+          </svg>
+          <div class="chart-legend"><span>${firstDate}</span><span>${results.length} attempt${results.length === 1 ? '' : 's'} · lower is better</span><span>${lastDate}</span></div>
         </article>`;
       }).join('');
     }
@@ -773,7 +841,7 @@
     });
     async function seedAndroidOfflineCopy() {
       if (!('caches' in window)) return;
-      const cache = await caches.open('five-daily-v4');
+      const cache = await caches.open('five-daily-v5');
       let pageResponse = null;
       try {
         const response = await fetch('./index.html', { credentials: 'include', cache: 'reload' });
