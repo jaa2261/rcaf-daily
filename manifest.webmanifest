@@ -3,7 +3,7 @@
   "short_name": "Five Daily",
   "description": "An offline-ready timer and progress tracker for the Royal Canadian Air Force 5BX plan.",
   "id": "./",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",

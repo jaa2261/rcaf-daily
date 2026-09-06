@@ -586,8 +586,41 @@
       installPrompt = null;
       $('installApp').hidden = true;
     });
+    async function seedAndroidOfflineCopy() {
+      if (!('caches' in window)) return;
+      const cache = await caches.open('five-daily-v2');
+      let pageResponse = null;
+      try {
+        const response = await fetch('./index.html', { credentials: 'include', cache: 'reload' });
+        if (response.ok) pageResponse = response;
+      } catch (_) {}
+      if (!pageResponse) {
+        pageResponse = new Response(`<!doctype html>\n${document.documentElement.outerHTML}`, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+      await cache.put('./index.html', pageResponse.clone());
+      await cache.put('./', pageResponse.clone());
+      const supportingFiles = ['./manifest.webmanifest', './assets/app-icon.svg'];
+      for (let chart = 1; chart <= 6; chart++) {
+        for (let exercise = 1; exercise <= 5; exercise++) {
+          supportingFiles.push(`./assets/exercises/chart-${chart}-exercise-${exercise}.png`);
+        }
+      }
+      await Promise.all(supportingFiles.map(async path => {
+        try {
+          const response = await fetch(path, { credentials: 'include' });
+          if (response.ok) await cache.put(path, response);
+        } catch (_) {}
+      }));
+    }
+    if (window.matchMedia('(display-mode: standalone)').matches) $('installApp').hidden = true;
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+      window.addEventListener('load', async () => {
+        await navigator.serviceWorker.register('./sw.js');
+        await navigator.serviceWorker.ready;
+        await seedAndroidOfflineCopy();
+      });
     }
   </script>
 </body>
